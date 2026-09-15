@@ -62,7 +62,7 @@ const fetchSuppliers = async () => {
         setSuppliers(res.data);
     } catch (error) {
         console.error("Suppliers Error:", error);
-        toast.error("Failed to load suppliers");
+        toast.error(t("Failedtoloadsuppliers"));
     }
 };
 
@@ -287,7 +287,9 @@ if (!form.barcode.trim()) {
             supplier: "",
             location: "",
             notes: "",
-            animaltype: ""
+            animaltype: "",
+            units_per_box: "",
+            box_price: "",
         });
         setErrors({});
         setModalOpen(true);
@@ -1109,6 +1111,26 @@ const deleteItem = async (id) => {
                                                 </p>
                                                 )}
                                             </div>
+
+
+
+                                            <Input
+                                                    type="number"
+                                                    label={t("unitsPerBox") || "Units per box"}
+                                                    value={form.units_per_box}
+                                                    onChange={(e) =>
+                                                        setForm({ ...form, units_per_box: e.target.value })
+                                                    }
+                                                />
+
+                                                <Input
+                                                    type="number"
+                                                    label={t("boxPrice") || "Box price (IQD)"}
+                                                    value={form.box_price}
+                                                    onChange={(e) =>
+                                                        setForm({ ...form, box_price: e.target.value })
+                                                    }
+                                                />
 
                                         </div>
                                     </div>

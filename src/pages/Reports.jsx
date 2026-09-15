@@ -332,6 +332,14 @@ export default function Reports() {
     return map;
   }, {});
 
+  const roomsPendingMap = (data?.roomsPendingPayments || []).reduce((map, row) => {
+  map[row.department] = Number(row.paid);
+  return map;
+}, {});
+
+const roomsPendingPaidTotal =
+  (roomsPendingMap["Hotel"] || 0) + (roomsPendingMap["Hospital"] || 0);
+
   const hotelStats = roomsByDeptMap["Hotel"] || {
     total: 0,
     paid: 0,
@@ -521,7 +529,7 @@ export default function Reports() {
   // actually collected in this range, since that's real cash received
   // — outstanding/remaining debt is NOT included here.
 
-  const totalDepartmentsRevenue = totalSalesRevenue + totalDebtsPaid;
+  const totalDepartmentsRevenue = totalSalesRevenue + totalDebtsPaid + roomsPendingPaidTotal;
 
   // Simple revenue - expenses, before cost of goods sold is factored
   // in. Shown as its own card next to Total expenses so you can see
@@ -634,7 +642,7 @@ export default function Reports() {
                 icon={DollarSign}
                 label={t("totalDepartmentsRevenue") || "Total revenue (all departments)"}
                 value={`${formatIQD(totalDepartmentsRevenue)} IQD`}
-                sub={`${totalSalesCount} ${t("bills") || "bills"} + ${formatIQD(totalDebtsPaid)} IQD ${t("debtsPaid") || "debts paid"}`}
+                sub={`${totalSalesCount} ${t("bills") || "bills"} + ${formatIQD(totalDebtsPaid)} IQD ${t("debtsPaid") || "debts paid"} + ${formatIQD(roomsPendingPaidTotal)} IQD ${t("roomDeposits") || "room deposits"}`}
                 bg="bg-orange-50"
                 border="border-orange-100"
                 iconBg="bg-orange-100"
@@ -1336,25 +1344,24 @@ export default function Reports() {
                     <tr>
                       <th className="p-3 text-left">{t("name")}</th>
                       <th className="p-3 text-center">{t("quantitySold") || "Qty sold"}</th>
+                      <th className="p-3 text-center">{t("boxesSold") || "Boxes sold"}</th>
                       <th className="p-3 text-right">{t("revenue") || "Revenue"}</th>
                     </tr>
                   </thead>
-                  <tbody>
-                    {data.topItems.map((item, idx) => (
-                      <tr
-                        key={item.item_name}
-                        className={`border-b last:border-0 ${
-                          idx % 2 === 1 ? "bg-gray-50/50" : ""
-                        } hover:bg-orange-50`}
-                      >
-                        <td className="p-3 font-medium text-gray-700">{item.item_name}</td>
-                        <td className="p-3 text-center">{item.quantity_sold}</td>
-                        <td className="p-3 text-right font-semibold text-orange-600">
-                          {formatIQD(item.revenue)} IQD
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
+                    <tbody>
+                      {data.topItems.map((item, idx) => (
+                        <tr key={item.item_name} /* ...unchanged... */>
+                          <td className="p-3 font-medium text-gray-700">{item.item_name}</td>
+                          <td className="p-3 text-center">{item.quantity_sold} <span className="text-gray-400">pcs</span></td>
+                          <td className="p-3 text-center">
+                            {Number(item.boxes_sold) > 0 ? item.boxes_sold : "-"}
+                          </td>
+                          <td className="p-3 text-right font-semibold text-orange-600">
+                            {formatIQD(item.revenue)} IQD
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
                 </table>
               </div>
             </Card>

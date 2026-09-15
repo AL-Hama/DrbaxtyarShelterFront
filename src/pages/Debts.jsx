@@ -229,7 +229,7 @@ export default function Debts() {
             });
         } catch (error) {
             console.error(error);
-            toast.error(t("toastFailLoadDebt") || "Failed to load debt");
+            toast.error(t("toastFailLoadDebts") || "Failed to load debt");
             setEditingDebt(null);
         } finally {
             setLoadingEdit(false);

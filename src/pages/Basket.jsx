@@ -89,7 +89,7 @@ export default function Basket() {
     const [search, setSearch] = useState("");
 
     const emptyBasket = () => ({
-        cart: [], // [{ inventoryId, name, unit_price, quantity, stock }]
+        cart: [], // [{ inventoryId, saleType, name, unit_price, box_price, units_per_box, quantity, stock }]
         customerName: "",
         customerPhone: "",
         discount: "",
@@ -354,23 +354,37 @@ export default function Basket() {
 
     // ---------- Cart logic ----------
 
-    const cartQtyFor = (inventoryId) =>
-        cart.find((c) => c.inventoryId === inventoryId)?.quantity || 0;
+    const reservedPiecesFor = (inventoryId) =>
+        cart.reduce((sum, c) => {
+            if (c.inventoryId !== inventoryId) return sum;
+            const per = c.saleType === "box" ? c.units_per_box : 1;
+            return sum + per * c.quantity;
+        }, 0);
 
-    const addToCart = (item) => {
-        const inCart = cartQtyFor(item.id);
+    const cartQtyFor = (inventoryId, saleType) =>
+        cart.find((c) => c.inventoryId === inventoryId && c.saleType === saleType)
+            ?.quantity || 0;
 
-        if (inCart >= Number(item.quantity)) {
+    const addToCart = (item, saleType = "unit") => {
+        const unitsPerBox = Number(item.units_per_box) || 0;
+        if (saleType === "box" && unitsPerBox <= 0) return;
+
+        const piecesToAdd = saleType === "box" ? unitsPerBox : 1;
+        const reserved = reservedPiecesFor(item.id);
+
+        if (reserved + piecesToAdd > Number(item.quantity)) {
             toast.error(t("basketNoMoreStock") || "No more stock available");
             return;
         }
 
         setCart((prev) => {
-            const existing = prev.find((c) => c.inventoryId === item.id);
+            const existing = prev.find(
+                (c) => c.inventoryId === item.id && c.saleType === saleType
+            );
 
             if (existing) {
                 return prev.map((c) =>
-                    c.inventoryId === item.id
+                    c.inventoryId === item.id && c.saleType === saleType
                         ? { ...c, quantity: c.quantity + 1 }
                         : c
                 );
@@ -380,8 +394,11 @@ export default function Basket() {
                 ...prev,
                 {
                     inventoryId: item.id,
+                    saleType,
                     name: item.name,
                     unit_price: Number(item.unit_price),
+                    box_price: Number(item.box_price) || 0,
+                    units_per_box: unitsPerBox,
                     quantity: 1,
                     stock: Number(item.quantity),
                 },
@@ -389,29 +406,38 @@ export default function Basket() {
         });
     };
 
-    const changeQty = (inventoryId, delta) => {
-        setCart((prev) =>
-            prev
+    const changeQty = (inventoryId, saleType, delta) => {
+        setCart((prev) => {
+            const otherLinesPieces = prev.reduce((sum, o) => {
+                if (o.inventoryId !== inventoryId || o.saleType === saleType) return sum;
+                const per = o.saleType === "box" ? o.units_per_box : 1;
+                return sum + per * o.quantity;
+            }, 0);
+
+            return prev
                 .map((c) => {
-                    if (c.inventoryId !== inventoryId) return c;
+                    if (c.inventoryId !== inventoryId || c.saleType !== saleType) return c;
 
                     const nextQty = c.quantity + delta;
+                    const per = saleType === "box" ? c.units_per_box : 1;
 
-                    if (nextQty > c.stock) {
-                        toast.error(
-                            t("basketNoMoreStock") || "No more stock available"
-                        );
+                    if (nextQty * per + otherLinesPieces > c.stock) {
+                        toast.error(t("basketNoMoreStock") || "No more stock available");
                         return c;
                     }
 
                     return { ...c, quantity: nextQty };
                 })
-                .filter((c) => c.quantity > 0)
-        );
+                .filter((c) => c.quantity > 0);
+        });
     };
 
-    const removeFromCart = (inventoryId) => {
-        setCart((prev) => prev.filter((c) => c.inventoryId !== inventoryId));
+    const removeFromCart = (inventoryId, saleType) => {
+        setCart((prev) =>
+            prev.filter(
+                (c) => !(c.inventoryId === inventoryId && c.saleType === saleType)
+            )
+        );
     };
 
     const dayCount = usesDays(department)
@@ -419,7 +445,12 @@ export default function Basket() {
         : 1;
 
     const perDaySubtotal = useMemo(
-        () => cart.reduce((sum, c) => sum + c.unit_price * c.quantity, 0),
+        () =>
+            cart.reduce(
+                (sum, c) =>
+                    sum + (c.saleType === "box" ? c.box_price : c.unit_price) * c.quantity,
+                0
+            ),
         [cart]
     );
 
@@ -504,8 +535,11 @@ export default function Basket() {
                 items: cart.map((c) => ({
                     inventoryId: c.inventoryId,
                     name: c.name,
+                    saleType: c.saleType,
+                    quantity: c.quantity,           // boxes or units, as entered
                     unitPrice: c.unit_price,
-                    quantity: c.quantity,
+                    boxPrice: c.box_price,
+                    unitsPerBox: c.units_per_box,
                 })),
             };
 
@@ -609,15 +643,16 @@ export default function Basket() {
             const pad = (text) => "     " + text; // left margin (creates right padding effect)
 
             const itemLines = receiptBill.items
-                .map((c) =>
-                    pad(
+                .map((c) => {
+                    const price = c.saleType === "box" ? c.box_price : c.unit_price;
+                    return pad(
                         `${c.name.substring(0, 12).padEnd(12)} ${String(
                             c.quantity
-                        ).padEnd(3)} ${String(c.unit_price).padEnd(
+                        ).padEnd(3)} ${String(price).padEnd(
                             6
-                        )} ${(c.unit_price * c.quantity).toFixed(2)}`
-                    )
-                )
+                        )} ${(price * c.quantity).toFixed(2)}`
+                    );
+                })
                 .join("\n");
 
             const createdAt = new Date(
@@ -811,48 +846,76 @@ export default function Basket() {
                         ) : (
                             <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
                                 {filteredItems.map((item) => {
-                                    const inCart = cartQtyFor(item.id);
-                                    const outOfRoom =
-                                        inCart >= Number(item.quantity);
+                                    const unitQty = cartQtyFor(item.id, "unit");
+                                    const boxQty = cartQtyFor(item.id, "box");
+                                    const reserved = reservedPiecesFor(item.id);
+                                    const outOfRoom = reserved >= Number(item.quantity);
+                                    const canSellByBox = Number(item.units_per_box) > 0;
 
                                     return (
-                                        <button
-                                            key={item.id}
-                                            onClick={() => addToCart(item)}
-                                            disabled={outOfRoom}
-                                            className={`
-                                                relative flex flex-col items-start
-                                                rounded-xl border p-4 text-left
-                                                transition
-                                                ${outOfRoom
-                                                    ? "opacity-40 cursor-not-allowed border-gray-200"
-                                                    : "border-gray-200 hover:border-orange-300 hover:shadow-md"
-                                                }
-                                            `}
-                                        >
-                                            {inCart > 0 && (
-                                                <span className={`absolute -top-2 -right-2 h-6 w-6 rounded-full text-xs font-bold flex items-center justify-center ${style.chip}`}>
-                                                    {inCart}
+                                        <div key={item.id} className="relative">
+                                            <button
+                                                onClick={() => addToCart(item, "unit")}
+                                                disabled={outOfRoom}
+                                                className={`
+                                                    relative flex w-full flex-col items-start
+                                                    rounded-xl border p-4 text-left
+                                                    transition
+                                                    ${outOfRoom
+                                                        ? "opacity-40 cursor-not-allowed border-gray-200"
+                                                        : "border-gray-200 hover:border-orange-300 hover:shadow-md"
+                                                    }
+                                                `}
+                                            >
+                                                {unitQty > 0 && (
+                                                    <span className={`absolute -top-2 -right-2 h-6 w-6 rounded-full text-xs font-bold flex items-center justify-center ${style.chip}`}>
+                                                        {unitQty}
+                                                    </span>
+                                                )}
+                                                {boxQty > 0 && (
+                                                    <span className="absolute -top-2 -left-2 h-6 w-6 rounded-full text-xs font-bold flex items-center justify-center bg-purple-100 text-purple-700">
+                                                        {boxQty}📦
+                                                    </span>
+                                                )}
+
+                                                <span className="font-semibold text-gray-800 line-clamp-2">
+                                                    {item.name}
                                                 </span>
+
+                                                <span className="mt-1 text-orange-600 font-bold">
+                                                    {formatIQD(item.unit_price)} IQD
+                                                </span>
+
+                                                {canSellByBox && (
+                                                    <span className="mt-0.5 text-xs text-purple-500">
+                                                        {t("boxOf") || "Box of"} {item.units_per_box} — {formatIQD(item.box_price)} IQD
+                                                    </span>
+                                                )}
+
+                                                <span className="mt-1 text-xs text-gray-400">
+                                                    {t("stock") || "Stock"}: {item.quantity}
+                                                </span>
+                                            </button>
+
+                                            {canSellByBox && (
+                                                <button
+                                                    onClick={() => addToCart(item, "box")}
+                                                    disabled={reserved + item.units_per_box > Number(item.quantity)}
+                                                    className="mt-1 w-full rounded-lg border border-purple-200 bg-purple-50 py-1 text-xs font-semibold text-purple-700 hover:bg-purple-100 disabled:opacity-40"
+                                                >
+                                                    + {t("addBox") || "Add box"}
+                                                </button>
                                             )}
-
-                                            <span className="font-semibold text-gray-800 line-clamp-2">
-                                                {item.name}
-                                            </span>
-
-                                            <span className="mt-1 text-orange-600 font-bold">
-                                                {formatIQD(item.unit_price)} IQD
-                                            </span>
-
-                                            <span className="mt-1 text-xs text-gray-400">
-                                                {t("stock") || "Stock"}: {item.quantity}
-                                            </span>
-                                        </button>
+                                        </div>
                                     );
                                 })}
                             </div>
                         )}
                     </Card>
+
+
+
+                    
 
                     {/* Recent bills for this department */}
                     <Card>
@@ -946,22 +1009,27 @@ export default function Basket() {
                             <div className="space-y-3 max-h-72 overflow-y-auto pr-1">
                                 {cart.map((c) => (
                                     <div
-                                        key={c.inventoryId}
+                                        key={`${c.inventoryId}-${c.saleType}`}
                                         className="flex items-center justify-between gap-2 rounded-lg bg-gray-50 p-3"
                                     >
                                         <div className="min-w-0">
                                             <p className="truncate font-medium text-sm text-gray-800">
                                                 {c.name}
+                                                {c.saleType === "box" && (
+                                                    <span className="ml-1 text-xs text-purple-500">
+                                                        ({t("box") || "Box"} × {c.units_per_box})
+                                                    </span>
+                                                )}
                                             </p>
                                             <p className="text-xs text-gray-500">
-                                                {formatIQD(c.unit_price)} IQD
+                                                {formatIQD(c.saleType === "box" ? c.box_price : c.unit_price)} IQD
                                             </p>
                                         </div>
 
                                         <div className="flex items-center gap-1 shrink-0">
                                             <button
                                                 onClick={() =>
-                                                    changeQty(c.inventoryId, -1)
+                                                    changeQty(c.inventoryId, c.saleType, -1)
                                                 }
                                                 className="rounded-md bg-white border p-1 hover:bg-gray-100"
                                             >
@@ -974,7 +1042,7 @@ export default function Basket() {
 
                                             <button
                                                 onClick={() =>
-                                                    changeQty(c.inventoryId, 1)
+                                                    changeQty(c.inventoryId, c.saleType, 1)
                                                 }
                                                 className="rounded-md bg-white border p-1 hover:bg-gray-100"
                                             >
@@ -983,7 +1051,7 @@ export default function Basket() {
 
                                             <button
                                                 onClick={() =>
-                                                    removeFromCart(c.inventoryId)
+                                                    removeFromCart(c.inventoryId, c.saleType)
                                                 }
                                                 className="ml-1 rounded-md p-1 text-red-500 hover:bg-red-50"
                                             >
@@ -1328,15 +1396,20 @@ export default function Basket() {
                             <div className="border-t border-dashed border-orange-200 pt-2 space-y-1">
                                 {receiptBill.items.map((c) => (
                                     <div
-                                        key={c.inventoryId}
+                                        key={`${c.inventoryId}-${c.saleType}`}
                                         className="flex justify-between text-gray-700"
                                     >
                                         <span className="truncate pr-2">
                                             {c.quantity}x {c.name}
+                                            {c.saleType === "box" && (
+                                                <span className="text-purple-500">
+                                                    {" "}({t("box") || "Box"})
+                                                </span>
+                                            )}
                                         </span>
                                         <span>
                                             {formatIQD(
-                                                c.unit_price * c.quantity
+                                                (c.saleType === "box" ? c.box_price : c.unit_price) * c.quantity
                                             )}
                                         </span>
                                     </div>
